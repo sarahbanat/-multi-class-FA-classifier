@@ -1,0 +1,212 @@
+import mlflow
+import mlflow.sklearn
+import numpy as np
+import logging
+import os
+from typing import List
+import csv
+
+from sklearn.svm import LinearSVC
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import cross_validate, StratifiedKFold, KFold, cross_val_predict
+
+
+from .data_loader import load_data
+from .feature_engineering import get_features_labels
+from .evaluate import log_classification_results, log_regression_results
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+
+DATA_PATH = 'data/data.csv'
+RESULTS_DIR = './results_final_test/'
+EXP_NUM = 0
+EXPERIMENT_NAME = "New Hierarchical Power System Classifier v2"
+
+NEEDED_PMUS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39]
+RANDOM_STATE = 42
+CV_FOLDS = 10
+
+SVC_MAX_ITER = 1200000
+RF_N_ESTIMATORS = 50
+
+
+NORMAL_FLAG = 0
+ATTACK_FLAG = 1
+FAULT_FLAG = 2
+
+def run_training_pipeline():
+    """Runs the full hierarchical training and evaluation pipeline with MLflow logging."""
+    
+    logging.info(f"Starting training pipeline for experiment: {EXPERIMENT_NAME}")
+    mlflow.set_experiment(EXPERIMENT_NAME)
+
+    
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    logging.info(f"Ensured results directory exists: {RESULTS_DIR}")
+
+    
+    try:
+        df = load_data(DATA_PATH, random_state=RANDOM_STATE)
+        X, y_level1, y_fault_type, y_fault_location, y_distance, y_attack_type = get_features_labels(df, NEEDED_PMUS)
+        logging.info(f"Data prepared. Features shape: {X.shape}, Labels length: {len(y_level1)}")
+    except Exception as e:
+        logging.error(f"Pipeline aborted due to data loading/preparation error: {e}")
+        return
+
+    
+    with mlflow.start_run(run_name="Main Hierarchical Pipeline") as parent_run:
+        logging.info(f"Started main MLflow run: {parent_run.info.run_id}")
+        mlflow.log_param("data_path", DATA_PATH)
+        mlflow.log_param("pmu_list", str(NEEDED_PMUS))
+        mlflow.log_param("random_state", RANDOM_STATE)
+        mlflow.log_param("cv_folds", CV_FOLDS)
+        mlflow.log_param("svc_max_iter", SVC_MAX_ITER)
+        mlflow.log_param("rf_n_estimators", RF_N_ESTIMATORS)
+
+        
+        logging.info("--- Starting Level 1 Classification ---")
+        try:
+            clf_level1 = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER, dual=False)
+            
+            skf_level1 = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
+            
+            scores_level1 = cross_validate(clf_level1, X, y_level1, cv=skf_level1, 
+                                         return_train_score=True, scoring='accuracy')
+            y_pred_level1 = cross_val_predict(clf_level1, X, y_level1, cv=skf_level1)
+            
+            mlflow.log_param("level1_classifier", "LinearSVC")
+            log_classification_results(y_level1, y_pred_level1, scores_level1, prefix="level1", 
+                                       exp_name=EXPERIMENT_NAME, exp_num=EXP_NUM, file_directory=RESULTS_DIR)
+            logging.info("Level 1 Classification completed and logged.")
+
+            
+            
+            
+        except Exception as e:
+            logging.error(f"Error during Level 1 Classification: {e}", exc_info=True)
+            
+            
+
+        
+        fault_indices = np.where(y_level1 == FAULT_FLAG)[0]
+        attack_indices = np.where(y_level1 == ATTACK_FLAG)[0]
+
+        X_fault = X[fault_indices]
+        y_fault_type_filtered = y_fault_type.iloc[fault_indices].reset_index(drop=True)
+        y_fault_location_filtered = y_fault_location.iloc[fault_indices].reset_index(drop=True)
+        y_distance_filtered = y_distance.iloc[fault_indices].reset_index(drop=True)
+
+        X_attack = X[attack_indices]
+        y_attack_type_filtered = y_attack_type.iloc[attack_indices].reset_index(drop=True)
+
+        logging.info(f"Data filtered: {len(fault_indices)} fault samples, {len(attack_indices)} attack samples.")
+        print(f"DEBUG: Number of fault samples: {len(X_fault)}")
+        print(f"DEBUG: Number of attack samples: {len(X_attack)}")
+
+        
+        if len(X_fault) > 0:
+            logging.info("--- Starting Fault Diagnosis Branch ---")
+            with mlflow.start_run(run_name="Fault Diagnosis", nested=True) as fault_run:
+                logging.info(f"Started Fault Diagnosis run: {fault_run.info.run_id}")
+                mlflow.log_param("num_fault_samples", len(X_fault))
+
+                
+                logging.info("Training Fault Type Classifier...")
+                try:
+                    clf_ft = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER, dual=False)
+                    
+                    n_splits_ft = min(CV_FOLDS, y_fault_type_filtered.nunique(), len(X_fault))
+                    if n_splits_ft < 2:
+                         logging.warning(f"Skipping Fault Type CV: Not enough samples/classes ({len(X_fault)} samples, {y_fault_type_filtered.nunique()} classes)")
+                    else:
+                        skf_ft = StratifiedKFold(n_splits=n_splits_ft, shuffle=True, random_state=RANDOM_STATE)
+                        scores_ft = cross_validate(clf_ft, X_fault, y_fault_type_filtered, cv=skf_ft, 
+                                                return_train_score=True, scoring='accuracy')
+                        y_pred_ft = cross_val_predict(clf_ft, X_fault, y_fault_type_filtered, cv=skf_ft)
+                        mlflow.log_param("fault_type_classifier", "LinearSVC")
+                        log_classification_results(y_fault_type_filtered, y_pred_ft, scores_ft, 
+                                                   prefix="fault_type", exp_name=EXPERIMENT_NAME, 
+                                                   exp_num=EXP_NUM, file_directory=RESULTS_DIR)
+                        logging.info("Fault Type Classification completed.")
+                except Exception as e:
+                    logging.error(f"Error during Fault Type Classification: {e}", exc_info=True)
+
+                
+                logging.info("Training Fault Location Classifier...")
+                try:
+                    clf_fl = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER, dual=False)
+                    
+                    n_splits_fl = min(CV_FOLDS, y_fault_location_filtered.nunique(), len(X_fault))
+                    if n_splits_fl < 2:
+                         logging.warning(f"Skipping Fault Location CV: Not enough samples/classes ({len(X_fault)} samples, {y_fault_location_filtered.nunique()} classes)")
+                    else:
+                        skf_fl = StratifiedKFold(n_splits=n_splits_fl, shuffle=True, random_state=RANDOM_STATE)
+                        scores_fl = cross_validate(clf_fl, X_fault, y_fault_location_filtered, cv=skf_fl, 
+                                                return_train_score=True, scoring='accuracy')
+                        y_pred_fl = cross_val_predict(clf_fl, X_fault, y_fault_location_filtered, cv=skf_fl)
+                        mlflow.log_param("fault_location_classifier", "LinearSVC")
+                        log_classification_results(y_fault_location_filtered, y_pred_fl, scores_fl, 
+                                                   prefix="fault_location", exp_name=EXPERIMENT_NAME, 
+                                                   exp_num=EXP_NUM, file_directory=RESULTS_DIR)
+                        logging.info("Fault Location Classification completed.")
+                except Exception as e:
+                    logging.error(f"Error during Fault Location Classification: {e}", exc_info=True)
+                
+                
+                logging.info("Training Fault Distance Regressor...")
+                try:
+                    
+                    rf_reg = RandomForestRegressor(n_estimators=RF_N_ESTIMATORS, random_state=RANDOM_STATE, n_jobs=-1)
+                    
+                    n_splits_dist = min(CV_FOLDS, len(X_fault))
+                    if n_splits_dist < 2:
+                        logging.warning(f"Skipping Fault Distance CV: Not enough samples ({len(X_fault)}) ")
+                    else:
+                        kf_dist = KFold(n_splits=n_splits_dist, shuffle=True, random_state=RANDOM_STATE)
+                        scoring_dist = ('neg_mean_squared_error', 'neg_root_mean_squared_error', 
+                                        'r2', 'neg_mean_absolute_error', 'neg_mean_absolute_percentage_error')
+                        scores_dist = cross_validate(rf_reg, X_fault, y_distance_filtered, cv=kf_dist, 
+                                                    return_train_score=True, scoring=scoring_dist, n_jobs=-1)
+                        
+                        mlflow.log_param("distance_regressor", "RandomForestRegressor")
+                        log_regression_results(scores_dist, prefix="distance", exp_name=EXPERIMENT_NAME, 
+                                               exp_num=EXP_NUM, file_directory=RESULTS_DIR)
+                        logging.info("Fault Distance Regression completed.")
+                except Exception as e:
+                    logging.error(f"Error during Fault Distance Regression: {e}", exc_info=True)
+        else:
+            logging.warning("Skipping Fault Diagnosis branch: No fault samples found after Level 1 filtering.")
+
+        
+        if len(X_attack) > 0:
+            logging.info("--- Starting Cyber Attack Analysis Branch ---")
+            with mlflow.start_run(run_name="Cyber Attack Analysis", nested=True) as attack_run:
+                logging.info(f"Started Cyber Attack Analysis run: {attack_run.info.run_id}")
+                mlflow.log_param("num_attack_samples", len(X_attack))
+                
+                
+                logging.info("Training Attack Type Classifier...")
+                try:
+                    clf_at = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER, dual=False)
+                    
+                    n_splits_at = min(CV_FOLDS, y_attack_type_filtered.nunique(), len(X_attack))
+                    if n_splits_at < 2:
+                        logging.warning(f"Skipping Attack Type CV: Not enough samples/classes ({len(X_attack)} samples, {y_attack_type_filtered.nunique()} classes)")
+                    else:
+                        skf_at = StratifiedKFold(n_splits=n_splits_at, shuffle=True, random_state=RANDOM_STATE)
+                        scores_at = cross_validate(clf_at, X_attack, y_attack_type_filtered, cv=skf_at, 
+                                                return_train_score=True, scoring='accuracy')
+                        y_pred_at = cross_val_predict(clf_at, X_attack, y_attack_type_filtered, cv=skf_at)
+                        mlflow.log_param("attack_type_classifier", "LinearSVC")
+                        log_classification_results(y_attack_type_filtered, y_pred_at, scores_at, 
+                                                   prefix="attack_type", exp_name=EXPERIMENT_NAME, 
+                                                   exp_num=EXP_NUM, file_directory=RESULTS_DIR)
+                        logging.info("Attack Type Classification completed.")
+                except Exception as e:
+                    logging.error(f"Error during Attack Type Classification: {e}", exc_info=True)
+        else:
+            logging.warning("Skipping Cyber Attack Analysis branch: No attack samples found after Level 1 filtering.")
+
+    logging.info("Training pipeline finished.")
+

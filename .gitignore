@@ -1,0 +1,7 @@
+data/
+old_data/
+mlruns/
+old_results/
+__pycache__/
+*.pyc
+*.log
