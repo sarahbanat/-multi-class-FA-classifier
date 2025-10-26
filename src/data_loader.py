@@ -29,7 +29,7 @@ def load_data(file_path: str, random_state: int = 42) -> pd.DataFrame:
 
 
 if __name__ == '__main__':
-    data_path = 'data/39_FullDataset_normal_faullt_attack.csv' 
+    data_path = 'data/data.csv' 
     df = load_data(data_path)
     print(df.head())
     print(df.info()) 

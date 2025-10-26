@@ -5,3 +5,6 @@ old_results/
 __pycache__/
 *.pyc
 *.log
+results_final_test/
+docs/
+*.csv

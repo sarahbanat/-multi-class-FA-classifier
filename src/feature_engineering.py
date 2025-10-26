@@ -1,9 +1,9 @@
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import StandardScaler
 import fnmatch
 import logging
 from typing import List, Tuple
+from sklearn.preprocessing import StandardScaler
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -35,11 +35,11 @@ def get_features_labels(df: pd.DataFrame, pmu_list: List[int]) -> Tuple:
              raise ValueError("No feature columns selected. Check PMU list and column names.")
 
     logging.info(f"Number of selected feature columns: {len(selected_feature_cols)}")
-    X = df[selected_feature_cols].copy()
+    X = df[selected_feature_cols].to_numpy(copy=True)
 
-    logging.info("Scaling features using StandardScaler")
+    logging.info("Normalizing features with StandardScaler")
     scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
+    X = scaler.fit_transform(X)
 
     logging.info("Extracting labels")
     y_level1 = df.iloc[:, FLAG_COL_IDX].copy()
@@ -48,14 +48,14 @@ def get_features_labels(df: pd.DataFrame, pmu_list: List[int]) -> Tuple:
     y_distance = df.iloc[:, DISTANCE_COL_IDX].copy()
     y_attack_type = df.iloc[:, ATTACK_TYPE_COL_IDX].copy()
 
-    assert X_scaled.shape[0] == len(y_level1), "Mismatch between feature and label rows"
+    assert X.shape[0] == len(y_level1), "Mismatch between feature and label rows"
 
-    return X_scaled, y_level1, y_fault_type, y_fault_location, y_distance, y_attack_type
+    return X, y_level1, y_fault_type, y_fault_location, y_distance, y_attack_type
 
 
 if __name__ == '__main__':
     from data_loader import load_data
-    data_path = 'data/39_FullDataset_normal_faullt_attack.csv'
+    data_path = 'data/data.csv'
     needed_pmus = [1]
     df = load_data(data_path)
     X_s, yl1, yft, yfl, yd, yat = get_features_labels(df, needed_pmus)

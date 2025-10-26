@@ -9,6 +9,11 @@ import csv
 from sklearn.svm import LinearSVC
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import cross_validate, StratifiedKFold, KFold, cross_val_predict
+from sklearn.pipeline import Pipeline as SkPipeline
+from sklearn.preprocessing import StandardScaler
+
+from imblearn.pipeline import Pipeline as ImbPipeline
+from imblearn.over_sampling import RandomOverSampler
 
 
 from .data_loader import load_data
@@ -30,16 +35,32 @@ CV_FOLDS = 10
 SVC_MAX_ITER = 1200000
 RF_N_ESTIMATORS = 50
 
+# Level 1 mitigation toggles
+LEVEL1_CLASS_WEIGHT = None
+LEVEL1_USE_RANDOM_OVERSAMPLER = False
+LEVEL1_SAMPLING_STRATEGY = 'auto'
+
 
 NORMAL_FLAG = 0
 ATTACK_FLAG = 1
 FAULT_FLAG = 2
+
+
+DEFAULT_SAMPLING_STRATEGY = 'auto'
+
+
+def configure_level1(class_weight=None, use_ros=False, sampling_strategy=DEFAULT_SAMPLING_STRATEGY):
+    global LEVEL1_CLASS_WEIGHT, LEVEL1_USE_RANDOM_OVERSAMPLER, LEVEL1_SAMPLING_STRATEGY
+    LEVEL1_CLASS_WEIGHT = class_weight
+    LEVEL1_USE_RANDOM_OVERSAMPLER = use_ros
+    LEVEL1_SAMPLING_STRATEGY = sampling_strategy
 
 def run_training_pipeline():
     
     logging.info(f"Starting training pipeline for experiment: {EXPERIMENT_NAME}")
     mlflow.set_experiment(EXPERIMENT_NAME)
 
+    
     os.makedirs(RESULTS_DIR, exist_ok=True)
     logging.info(f"Ensured results directory exists: {RESULTS_DIR}")
 
@@ -65,7 +86,28 @@ def run_training_pipeline():
         
         logging.info("--- Starting Level 1 Classification ---")
         try:
-            clf_level1 = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)
+            classifier = LinearSVC(
+                random_state=RANDOM_STATE,
+                max_iter=SVC_MAX_ITER,
+                dual=False,
+                class_weight=LEVEL1_CLASS_WEIGHT
+            )
+
+            if LEVEL1_USE_RANDOM_OVERSAMPLER:
+                ros = RandomOverSampler(
+                    random_state=RANDOM_STATE,
+                    sampling_strategy=LEVEL1_SAMPLING_STRATEGY
+                )
+                clf_level1 = ImbPipeline([
+                    ('sampler', ros),
+                    ('scaler', StandardScaler()),
+                    ('classifier', classifier)
+                ])
+            else:
+                clf_level1 = SkPipeline([
+                    ('scaler', StandardScaler()),
+                    ('classifier', classifier)
+                ])
             
             skf_level1 = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
             
@@ -90,12 +132,12 @@ def run_training_pipeline():
         fault_indices = np.where(y_level1 == FAULT_FLAG)[0]
         attack_indices = np.where(y_level1 == ATTACK_FLAG)[0]
 
-        X_fault = X[fault_indices]
+        X_fault = X[fault_indices, :]
         y_fault_type_filtered = y_fault_type.iloc[fault_indices].reset_index(drop=True)
         y_fault_location_filtered = y_fault_location.iloc[fault_indices].reset_index(drop=True)
         y_distance_filtered = y_distance.iloc[fault_indices].reset_index(drop=True)
 
-        X_attack = X[attack_indices]
+        X_attack = X[attack_indices, :]
         y_attack_type_filtered = y_attack_type.iloc[attack_indices].reset_index(drop=True)
 
         logging.info(f"Data filtered: {len(fault_indices)} fault samples, {len(attack_indices)} attack samples.")
@@ -112,7 +154,10 @@ def run_training_pipeline():
                 
                 logging.info("Training Fault Type Classifier...")
                 try:
-                    clf_ft = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)
+                    clf_ft = SkPipeline([
+                        ('scaler', StandardScaler()),
+                        ('classifier', LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER, dual=False))
+                    ])
                     
                     n_splits_ft = min(CV_FOLDS, y_fault_type_filtered.nunique(), len(X_fault))
                     if n_splits_ft < 2:
@@ -133,7 +178,10 @@ def run_training_pipeline():
                 
                 logging.info("Training Fault Location Classifier...")
                 try:
-                    clf_fl = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)
+                    clf_fl = SkPipeline([
+                        ('scaler', StandardScaler()),
+                        ('classifier', LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER, dual=False))
+                    ])
                     
                     n_splits_fl = min(CV_FOLDS, y_fault_location_filtered.nunique(), len(X_fault))
                     if n_splits_fl < 2:
@@ -155,7 +203,10 @@ def run_training_pipeline():
                 logging.info("Training Fault Distance Regressor...")
                 try:
                     
-                    rf_reg = RandomForestRegressor(n_estimators=RF_N_ESTIMATORS, random_state=80, n_jobs=-1)
+                    rf_reg = SkPipeline([
+                        ('scaler', StandardScaler()),
+                        ('regressor', RandomForestRegressor(n_estimators=RF_N_ESTIMATORS, random_state=RANDOM_STATE, n_jobs=-1))
+                    ])
                     
                     n_splits_dist = min(CV_FOLDS, len(X_fault))
                     if n_splits_dist < 2:
@@ -186,7 +237,10 @@ def run_training_pipeline():
                 
                 logging.info("Training Attack Type Classifier...")
                 try:
-                    clf_at = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)
+                    clf_at = SkPipeline([
+                        ('scaler', StandardScaler()),
+                        ('classifier', LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER, dual=False))
+                    ])
                     
                     n_splits_at = min(CV_FOLDS, y_attack_type_filtered.nunique(), len(X_attack))
                     if n_splits_at < 2:
@@ -207,3 +261,4 @@ def run_training_pipeline():
             logging.warning("Skipping Cyber Attack Analysis branch: No attack samples found after Level 1 filtering.")
 
     logging.info("Training pipeline finished.")
+

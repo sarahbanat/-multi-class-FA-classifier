@@ -1,8 +1,3 @@
-"""
-Automated Experiment Runner for 39-Bus Power System Attack Detection
-Reads experiment configurations from exp_list.txt and runs them sequentially.
-"""
-
 import logging
 import time
 import pandas as pd
@@ -20,7 +15,6 @@ logging.basicConfig(
 )
 
 def parse_exp_list(file_path='exp_list.txt'):
-    """Parse the experiment list file and return a list of experiment configurations."""
     experiments = []
     
     logging.info(f"Reading experiment list from {file_path}")
@@ -28,7 +22,7 @@ def parse_exp_list(file_path='exp_list.txt'):
     with open(file_path, 'r') as f:
         lines = f.readlines()
     
-    for line in lines[1:]:  # Skip header
+    for line in lines[1:]:  
         line = line.strip()
         if not line:
             continue
@@ -48,18 +42,9 @@ def parse_exp_list(file_path='exp_list.txt'):
     return experiments
 
 
-def run_all_experiments(start_from=0, end_at=None, skip_existing=False):
-    """
-    Run all experiments from the experiment list.
-    
-    Args:
-        start_from: Start from this experiment number (inclusive)
-        end_at: Stop at this experiment number (inclusive), None means run all
-        skip_existing: If True, skip experiments that already have results
-    """
+def run_all_experiments(start_from=0, end_at=None, skip_existing=False, level1_config=None):
     experiments = parse_exp_list()
     
-    # Filter experiments based on start_from and end_at
     experiments = [e for e in experiments if e['exp_num'] >= start_from]
     if end_at is not None:
         experiments = [e for e in experiments if e['exp_num'] <= end_at]
@@ -77,16 +62,19 @@ def run_all_experiments(start_from=0, end_at=None, skip_existing=False):
         logging.info(f"EXPERIMENT {exp_num}/{len(experiments)-1} - Using {num_pmus} PMUs: {pmu_list}")
         logging.info("=" * 80)
         
-        # Update pipeline configuration
         pipeline.NEEDED_PMUS = pmu_list
         pipeline.EXP_NUM = exp_num
         pipeline.EXPERIMENT_NAME = f"Exp_{exp_num:02d}_PMUs_{num_pmus}"
+
+        if hasattr(pipeline, "configure_level1"):
+            if level1_config:
+                pipeline.configure_level1(**level1_config)
+            else:
+                pipeline.configure_level1()
         
-        # Track experiment timing
         start_time = time.time()
         
         try:
-            # Run the training pipeline
             run_training_pipeline()
             
             elapsed_time = time.time() - start_time
@@ -100,7 +88,7 @@ def run_all_experiments(start_from=0, end_at=None, skip_existing=False):
                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
             
-            logging.info(f"✅ Experiment {exp_num} completed successfully in {elapsed_time:.2f}s")
+            logging.info(f"Experiment {exp_num} completed successfully in {elapsed_time:.2f}s")
             
         except Exception as e:
             elapsed_time = time.time() - start_time
@@ -115,10 +103,9 @@ def run_all_experiments(start_from=0, end_at=None, skip_existing=False):
                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
             
-            logging.error(f"❌ Experiment {exp_num} failed: {e}", exc_info=True)
+            logging.error(f"Experiment {exp_num} failed: {e}", exc_info=True)
             logging.info("Continuing to next experiment...")
     
-    # Save summary
     summary_df = pd.DataFrame(results_summary)
     summary_path = f'experiment_summary_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
     summary_df.to_csv(summary_path, index=False)
@@ -134,8 +121,7 @@ def run_all_experiments(start_from=0, end_at=None, skip_existing=False):
     return results_summary
 
 
-def run_single_experiment(exp_num):
-    """Run a single experiment by number."""
+def run_single_experiment(exp_num, level1_config=None):
     experiments = parse_exp_list()
     exp_config = next((e for e in experiments if e['exp_num'] == exp_num), None)
     
@@ -148,15 +134,19 @@ def run_single_experiment(exp_num):
     
     logging.info(f"Running Experiment {exp_num} with {num_pmus} PMUs: {pmu_list}")
     
-    # Update pipeline configuration
     pipeline.NEEDED_PMUS = pmu_list
     pipeline.EXP_NUM = exp_num
     pipeline.EXPERIMENT_NAME = f"Exp_{exp_num:02d}_PMUs_{num_pmus}"
+
+    if hasattr(pipeline, "configure_level1"):
+        if level1_config:
+            pipeline.configure_level1(**level1_config)
+        else:
+            pipeline.configure_level1()
     
-    # Run the training pipeline
     run_training_pipeline()
     
-    logging.info(f"✅ Experiment {exp_num} completed")
+    logging.info(f"Experiment {exp_num} completed")
 
 
 if __name__ == "__main__":
