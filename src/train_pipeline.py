@@ -6,8 +6,8 @@ import os
 from typing import List
 import csv
 
-from sklearn.svm import LinearSVC
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import LinearSVC  # Still used for fault_type, fault_location, attack_type
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier  # RF used for level1
 from sklearn.model_selection import cross_validate, StratifiedKFold, KFold, cross_val_predict
 
 
@@ -19,11 +19,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 
 DATA_PATH = 'data/data.csv'
-RESULTS_DIR = './results_final_test/'
+RESULTS_DIR = './results_final_test_january_4/'
 EXP_NUM = 0
 EXPERIMENT_NAME = "New Hierarchical Power System Classifier v2"
 
-NEEDED_PMUS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39]
+#NEEDED_PMUS = [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39]
 RANDOM_STATE = 42
 CV_FOLDS = 10
 
@@ -65,7 +65,8 @@ def run_training_pipeline():
         
         logging.info("--- Starting Level 1 Classification ---")
         try:
-            clf_level1 = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)
+            # clf_level1 = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)  # Commented out - fails on class 0
+            clf_level1 = RandomForestClassifier(n_estimators=RF_N_ESTIMATORS, random_state=RANDOM_STATE, n_jobs=-1)
             
             skf_level1 = StratifiedKFold(n_splits=CV_FOLDS, shuffle=True, random_state=RANDOM_STATE)
             
@@ -73,7 +74,8 @@ def run_training_pipeline():
                                          return_train_score=True, scoring='accuracy')
             y_pred_level1 = cross_val_predict(clf_level1, X, y_level1, cv=skf_level1)
             
-            mlflow.log_param("level1_classifier", "LinearSVC")
+            # mlflow.log_param("level1_classifier", "LinearSVC")  # Commented out
+            mlflow.log_param("level1_classifier", "RandomForestClassifier")
             log_classification_results(y_level1, y_pred_level1, scores_level1, prefix="level1", 
                                        exp_name=EXPERIMENT_NAME, exp_num=EXP_NUM, file_directory=RESULTS_DIR)
             logging.info("Level 1 Classification completed and logged.")
@@ -112,7 +114,8 @@ def run_training_pipeline():
                 
                 logging.info("Training Fault Type Classifier...")
                 try:
-                    clf_ft = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)
+                    clf_ft = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)  # LinearSVC works here (100% acc)
+                    # clf_ft = RandomForestClassifier(n_estimators=RF_N_ESTIMATORS, random_state=RANDOM_STATE, n_jobs=-1)
                     
                     n_splits_ft = min(CV_FOLDS, y_fault_type_filtered.nunique(), len(X_fault))
                     if n_splits_ft < 2:
@@ -123,6 +126,7 @@ def run_training_pipeline():
                                                 return_train_score=True, scoring='accuracy')
                         y_pred_ft = cross_val_predict(clf_ft, X_fault, y_fault_type_filtered, cv=skf_ft)
                         mlflow.log_param("fault_type_classifier", "LinearSVC")
+                        # mlflow.log_param("fault_type_classifier", "RandomForestClassifier")
                         log_classification_results(y_fault_type_filtered, y_pred_ft, scores_ft, 
                                                    prefix="fault_type", exp_name=EXPERIMENT_NAME, 
                                                    exp_num=EXP_NUM, file_directory=RESULTS_DIR)
@@ -133,7 +137,8 @@ def run_training_pipeline():
                 
                 logging.info("Training Fault Location Classifier...")
                 try:
-                    clf_fl = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)
+                    clf_fl = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)  # LinearSVC works here (~89% acc)
+                    # clf_fl = RandomForestClassifier(n_estimators=RF_N_ESTIMATORS, random_state=RANDOM_STATE, n_jobs=-1)
                     
                     n_splits_fl = min(CV_FOLDS, y_fault_location_filtered.nunique(), len(X_fault))
                     if n_splits_fl < 2:
@@ -144,6 +149,7 @@ def run_training_pipeline():
                                                 return_train_score=True, scoring='accuracy')
                         y_pred_fl = cross_val_predict(clf_fl, X_fault, y_fault_location_filtered, cv=skf_fl)
                         mlflow.log_param("fault_location_classifier", "LinearSVC")
+                        # mlflow.log_param("fault_location_classifier", "RandomForestClassifier")
                         log_classification_results(y_fault_location_filtered, y_pred_fl, scores_fl, 
                                                    prefix="fault_location", exp_name=EXPERIMENT_NAME, 
                                                    exp_num=EXP_NUM, file_directory=RESULTS_DIR)
@@ -186,7 +192,8 @@ def run_training_pipeline():
                 
                 logging.info("Training Attack Type Classifier...")
                 try:
-                    clf_at = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)
+                    clf_at = LinearSVC(random_state=RANDOM_STATE, max_iter=SVC_MAX_ITER)  # LinearSVC works here (~62% acc)
+                    # clf_at = RandomForestClassifier(n_estimators=RF_N_ESTIMATORS, random_state=RANDOM_STATE, n_jobs=-1)
                     
                     n_splits_at = min(CV_FOLDS, y_attack_type_filtered.nunique(), len(X_attack))
                     if n_splits_at < 2:
@@ -197,6 +204,7 @@ def run_training_pipeline():
                                                 return_train_score=True, scoring='accuracy')
                         y_pred_at = cross_val_predict(clf_at, X_attack, y_attack_type_filtered, cv=skf_at)
                         mlflow.log_param("attack_type_classifier", "LinearSVC")
+                        # mlflow.log_param("attack_type_classifier", "RandomForestClassifier")
                         log_classification_results(y_attack_type_filtered, y_pred_at, scores_at, 
                                                    prefix="attack_type", exp_name=EXPERIMENT_NAME, 
                                                    exp_num=EXP_NUM, file_directory=RESULTS_DIR)

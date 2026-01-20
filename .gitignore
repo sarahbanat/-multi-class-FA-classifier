@@ -5,6 +5,13 @@ old_results/
 __pycache__/
 *.pyc
 *.log
-results_final_test/
+results*
 docs/
 *.csv
+logs/
+apply_attacks_table6.py
+attack.py
+combine_datasets_for_experiments.py
+*.csv
+generating attacks/
+.DS_Store

@@ -40,7 +40,7 @@ def get_features_labels(df: pd.DataFrame, pmu_list: List[int]) -> Tuple:
     logging.info("Normalizing features with StandardScaler")
     scaler = StandardScaler()
     X = scaler.fit_transform(X)
-
+ 
     logging.info("Extracting labels")
     y_level1 = df.iloc[:, FLAG_COL_IDX].copy()
     y_fault_type = df.iloc[:, FAULT_TYPE_COL_IDX].copy()
@@ -62,3 +62,4 @@ if __name__ == '__main__':
     print("Features shape:", X_s.shape)
     print("Level 1 labels sample:", yl1.head())
     print("Fault Type labels sample:", yft.head()) 
+    print("THIS is X:", X_s)
